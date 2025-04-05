@@ -1,0 +1,12 @@
+test_cases_file: test/test_cases.csv #test_cases.yaml
+
+log:
+  failure: 
+    path: logs/test/failure.log
+    header: datetime|testfile| #add fields as required
+  summary: 
+    path: logs/test/summary.log
+    header: datetime|testfile|total|fail
+  format: "%(asctime)s|%(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  
