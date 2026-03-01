@@ -5,15 +5,16 @@ import time
 from datetime import datetime, timezone
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3.1"  # Change to your model name if different
-INPUT_FILE = "files/10q.txt"
-OUTPUT_FILE = "files/10q_responses.csv"
+MODEL_NAME = "llama3.1"
+INPUT_FILE = "files/9q.txt"
+OUTPUT_FILE = "files/9q_results.csv"
 
 
 def ask_model(question: str) -> str:
     prompt = (
-        question.strip()
-        + "\n\nRespond with ONLY the answer. No explanation. Provide the date in the format yyyy-mm-dd. If you don't know repsond with -"
+        question.strip() + "\n\nRespond with ONLY the answer. No explanation. "
+        "Provide the date in the format yyyy-mm-dd. "
+        "If you don't know respond with -"
     )
 
     response = requests.post(
@@ -21,7 +22,6 @@ def ask_model(question: str) -> str:
         json={"model": MODEL_NAME, "prompt": prompt, "stream": False},
         timeout=120,
     )
-
     response.raise_for_status()
     return response.json()["response"].strip()
 
@@ -38,7 +38,6 @@ def get_unique_column_name(headers, base_name):
     counter = 2
     while f"{base_name}_{counter}" in headers:
         counter += 1
-
     return f"{base_name}_{counter}"
 
 
@@ -60,25 +59,29 @@ def save_results(path, headers, rows):
         writer.writerows(rows)
 
 
-def append_duration_row(input_file: str, model: str, duration_ms: int):
-    # Build duration filename: same directory, base name + "_duration.csv"
+def append_duration_row(
+    input_file: str, model: str, warmup_s: int, measured_s: int, question_count: int
+):
     folder = os.path.dirname(input_file)
     base = os.path.splitext(os.path.basename(input_file))[0]
     duration_file = os.path.join(folder, f"{base}_duration.csv")
 
     file_exists = os.path.exists(duration_file)
-
-    # ISO datetime in UTC (stable). If you want local time, remove tz=timezone.utc.
     dt = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     with open(duration_file, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["datetime", "model", "duration_ms"])
-        writer.writerow([dt, model, duration_ms])
-
-
-# ... everything above unchanged ...
+            writer.writerow(
+                [
+                    "datetime_utc",
+                    "model",
+                    "warmup_seconds",
+                    "measured_seconds",
+                    "questions",
+                ]
+            )
+        writer.writerow([dt, model, warmup_s, measured_s, question_count])
 
 
 def main():
@@ -100,29 +103,43 @@ def main():
     for row in rows:
         row.append("")
 
-    model_index = len(headers) - 1
+    model_col_index = len(headers) - 1
 
-    # ✅ PURE INFERENCE TIMER (only model calls)
-    t0 = time.perf_counter()
+    # --------------------------
+    # 🔥 LIGHT WARMUP (1 question)
+    # --------------------------
+    print("Running light warmup (1 question)...")
+    warmup_start = time.perf_counter()
+
+    if questions:
+        _ = ask_model(questions[0])
+
+    warmup_s = round(time.perf_counter() - warmup_start)
+    print(f"Warmup finished in {warmup_s} s")
+
+    # --------------------------
+    # 📏 MEASURED PASS
+    # --------------------------
+    print("Running measured pass...")
+    measured_start = time.perf_counter()
 
     for question in questions:
         answer = ask_model(question)
 
         for row in rows:
             if row[0] == question:
-                row[model_index] = answer
+                row[model_col_index] = answer
                 break
 
-    duration_s = round(time.perf_counter() - t0)  # no decimals
+    measured_s = round(time.perf_counter() - measured_start)
+    print(f"Measured run finished in {measured_s} s")
 
-    # ✅ I/O happens AFTER timing
     save_results(OUTPUT_FILE, headers, rows)
-    append_duration_row(INPUT_FILE, MODEL_NAME, duration_s)
+
+    append_duration_row(INPUT_FILE, MODEL_NAME, warmup_s, measured_s, len(questions))
 
     print(f"\nSaved results to {OUTPUT_FILE}")
-    print(
-        f"Saved duration to {os.path.splitext(INPUT_FILE)[0]}_duration.csv: {duration_s} s"
-    )
+    print(f"Saved durations to {os.path.splitext(INPUT_FILE)[0]}_duration.csv")
 
 
 if __name__ == "__main__":
