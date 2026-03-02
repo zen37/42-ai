@@ -4,26 +4,68 @@ import os
 import time
 from datetime import datetime, timezone
 
+import re
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3.1"
+MODEL_NAME = "qwen3:latest"
 INPUT_FILE = "files/9q.txt"
 OUTPUT_FILE = "files/9q_results.csv"
 
+DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
+CONNECT_TIMEOUT_S = 5
+READ_TIMEOUT_S = 900
+MAX_RETRIES = 3
+
 
 def ask_model(question: str) -> str:
-    prompt = (
-        question.strip() + "\n\nRespond with ONLY the answer. No explanation. "
-        "Provide the date in the format yyyy-mm-dd. "
-        "If you don't know respond with -"
-    )
+    prompt = f"""Return EXACTLY one date in YYYY-MM-DD format.
+If the answer is unknown, return -.
+Do not include any other text.
 
-    response = requests.post(
-        OLLAMA_URL,
-        json={"model": MODEL_NAME, "prompt": prompt, "stream": False},
-        timeout=120,
-    )
-    response.raise_for_status()
-    return response.json()["response"].strip()
+Question: {question.strip()}
+Answer:"""
+
+    last_err = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.post(
+                OLLAMA_URL,
+                json={
+                    "model": MODEL_NAME,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.0,
+                        "num_predict": 16,  # hard cap to prevent rambling
+                        "stop": ["\n"],  # stop after first line
+                    },
+                },
+                timeout=(CONNECT_TIMEOUT_S, READ_TIMEOUT_S),
+            )
+
+            response.raise_for_status()
+            raw = response.json().get("response", "").strip()
+
+            # Extract first valid date anywhere in output
+            match = DATE_RE.search(raw)
+            if match:
+                return match.group(1)
+
+            return "-"  # if no valid date found
+
+        except (
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ConnectTimeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.ChunkedEncodingError,
+        ) as e:
+            last_err = e
+            time.sleep(2 * attempt)
+
+    print(f"[WARN] Failed after retries: {last_err}")
+    return "-"
 
 
 def read_questions(path: str):
