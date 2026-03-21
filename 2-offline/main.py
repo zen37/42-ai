@@ -19,8 +19,8 @@ OUTPUT_FILE = "files/9q_results.csv"
 MAX_MODEL_SIZE_GB = 6.0
 MAX_MODEL_SIZE_BYTES = int(MAX_MODEL_SIZE_GB * 1024 * 1024 * 1024)
 
-# Enforced cool-down between models (5 minutes)
-GAP_SECONDS = 300
+# Enforced cool-down between models (3 minutes)
+GAP_SECONDS = 180
 
 # Date-only extraction: YYYY-MM-DD or "-"
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
